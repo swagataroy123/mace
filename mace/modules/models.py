@@ -200,6 +200,7 @@ class MACE(torch.nn.Module):
             if "head" in data
             else torch.zeros_like(data["batch"])
         )
+
         displacement = torch.zeros(
             (num_graphs, 3, 3),
             dtype=data["positions"].dtype,
@@ -255,6 +256,7 @@ class MACE(torch.nn.Module):
         for interaction, product, readout in zip(
             self.interactions, self.products, self.readouts
         ):
+
             node_feats, sc = interaction(
                 node_attrs=data["node_attrs"],
                 node_feats=node_feats,
@@ -268,9 +270,21 @@ class MACE(torch.nn.Module):
                 node_attrs=data["node_attrs"],
             )
             node_feats_list.append(node_feats)
-            node_energies = readout(node_feats, node_heads)[
-                num_atoms_arange, node_heads
-            ]  # [n_nodes, len(heads)]
+
+            if (
+                hasattr(self, "similarity_fn")
+                and callable(self.similarity_fn)
+                and isinstance(readout, NonLinearReadoutBlock)
+            ):  # external codes to add multi_inference. hard coded name for similarity function. Uses object of class with precalculated training data descriptors
+                delta = self.similarity_fn(node_feats)
+                node_energies = readout(node_feats, node_heads, delta=delta)[
+                    num_atoms_arange, node_heads
+                ]
+            else:
+                delta = None
+                node_energies = readout(x=node_feats, heads=node_heads)[
+                    num_atoms_arange, node_heads
+                ]  # [n_nodes, len(heads)]
             energy = scatter_sum(
                 src=node_energies,
                 index=data["batch"],
@@ -408,9 +422,26 @@ class ScaleShiftMACE(MACE):
                 node_feats=node_feats, sc=sc, node_attrs=data["node_attrs"]
             )
             node_feats_list.append(node_feats)
-            node_es_list.append(
-                readout(node_feats, node_heads)[num_atoms_arange, node_heads]
-            )  # {[n_nodes, ], }
+            if (
+                hasattr(self, "similarity_fn")
+                and callable(self.similarity_fn)
+                and isinstance(readout, NonLinearReadoutBlock)
+            ):  # external codes to add multi_inference. hard coded name for similarity function. Uses object of class with precalculated training data descriptors
+                delta = self.similarity_fn(node_feats)
+                node_es_list.append(
+                    readout(node_feats, node_heads, delta=delta)[
+                        num_atoms_arange, node_heads
+                    ]
+                )
+            else:
+                delta = None
+                node_es_list.append(
+                    readout(node_feats, node_heads)[num_atoms_arange, node_heads]
+                )  # [n_nodes, len(heads)]
+
+            # node_es_list.append(
+            #    readout(node_feats, node_heads)[num_atoms_arange, node_heads]
+            # )  # {[n_nodes, ], }
 
         # Concatenate node features
         node_feats_out = torch.cat(node_feats_list, dim=-1)
