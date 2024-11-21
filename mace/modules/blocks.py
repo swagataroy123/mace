@@ -30,6 +30,7 @@ from .radial import (
     SoftTransform,
 )
 from .symmetric_contraction import SymmetricContraction
+from .multi_head_fraction import mask_with_deltas
 
 
 @compile_mode("script")
@@ -78,12 +79,20 @@ class NonLinearReadoutBlock(torch.nn.Module):
         self.linear_2 = o3.Linear(irreps_in=self.hidden_irreps, irreps_out=irrep_out)
 
     def forward(
-        self, x: torch.Tensor, heads: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        heads: Optional[torch.Tensor] = None,
+        delta: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:  # [n_nodes, irreps]  # [..., ]
         x = self.non_linearity(self.linear_1(x))
         if hasattr(self, "num_heads"):
             if self.num_heads > 1 and heads is not None:
-                x = mask_head(x, heads, self.num_heads)
+                if (
+                    delta is not None
+                ):  # extra inputs and masking to incorporate delta in prediction
+                    x = mask_with_deltas(x, delta, self.num_heads)
+                else:
+                    x = mask_head(x, heads, self.num_heads)
         return self.linear_2(x)  # [n_nodes, len(heads)]
 
 
